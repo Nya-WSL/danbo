@@ -3,6 +3,10 @@ import time
 import json
 import random
 
+import log
+
+logger = log.logger
+
 class BilibiliDanmakuSender:
     def __init__(self, sessdata, bili_jct):
         """
@@ -16,7 +20,7 @@ class BilibiliDanmakuSender:
             'bili_jct': bili_jct
         }
         self.csrf = bili_jct
-    
+
     def get_danmaku_config(self, room_id):
         """
         获取直播间弹幕配置
@@ -25,7 +29,7 @@ class BilibiliDanmakuSender:
         """
         url = "https://api.live.bilibili.com/xlive/web-room/v1/dM/GetDMConfigByGroup"
         params = {'room_id': room_id}
-        
+
         try:
             response = self.session.get(
                 url,
@@ -33,15 +37,15 @@ class BilibiliDanmakuSender:
                 cookies=self.cookies
             )
             data = response.json()
-            
+
             if data['code'] != 0:
-                print(f"获取弹幕配置失败: {data.get('message')}")
+                logger.error(f"获取弹幕配置失败: {data.get('message')}")
                 return None
-            
+
             # 解析可用的颜色和模式
             available_colors = []
             available_modes = []
-            
+
             for group in data['data']['group']:
                 for color in group['color']:
                     if color['status'] == 1:  # 只收集可用的颜色
@@ -50,21 +54,21 @@ class BilibiliDanmakuSender:
                             'color': color['color'],
                             'hex': color['color_hex']
                         })
-            
+
             for mode in data['data']['mode']:
                 if mode['status'] == 1:  # 只收集可用的模式
                     available_modes.append({
                         'name': mode['name'],
                         'mode': mode['mode']
                     })
-            
+
             return {
                 'colors': available_colors,
                 'modes': available_modes
             }
-        
+
         except Exception as e:
-            print(f"获取弹幕配置时出错: {str(e)}")
+            logger.error(f"获取弹幕配置时出错: {str(e)}")
             return None
     
     def set_danmaku_style(self, room_id, color_hex=None, mode=None):
@@ -76,14 +80,14 @@ class BilibiliDanmakuSender:
         :return: 是否设置成功
         """
         url = "https://api.live.bilibili.com/xlive/web-room/v1/dM/AjaxSetConfig"
-        
+
         # 准备请求参数
         data = {
             'room_id': room_id,
             'csrf': self.csrf,
             'csrf_token': self.csrf
         }
-        
+
         if color_hex:
             # 移除可能的0x前缀并转换为小写
             clean_hex = color_hex.lower().replace('0x', '')
@@ -91,9 +95,9 @@ class BilibiliDanmakuSender:
         elif mode is not None:
             data['mode'] = mode
         else:
-            print("必须提供颜色或模式参数")
+            logger.error("必须提供颜色或模式参数")
             return False
-        
+
         try:
             response = self.session.post(
                 url,
@@ -101,18 +105,18 @@ class BilibiliDanmakuSender:
                 cookies=self.cookies
             )
             result = response.json()
-            
+
             if result['code'] == 0:
-                print(f"弹幕样式设置成功: {result['data']['msg']}")
+                logger.debug(f"弹幕样式设置成功: {result['data']['msg']}")
                 return True
             else:
-                print(f"弹幕样式设置失败: {result.get('message')}")
+                logger.error(f"弹幕样式设置失败: {result.get('message')}")
                 return False
-        
+
         except Exception as e:
-            print(f"设置弹幕样式时出错: {str(e)}")
+            logger.error(f"设置弹幕样式时出错: {str(e)}")
             return False
-    
+
     def send_danmaku(self, room_id, message, color=16777215, mode=1, fontsize=25):
         """
         发送弹幕
@@ -124,10 +128,10 @@ class BilibiliDanmakuSender:
         :return: 是否发送成功
         """
         url = "https://api.live.bilibili.com/msg/send"
-        
+
         with open("config.json", "r", encoding="utf-8") as f:
             config = json.load(f)
-        
+
         # 准备请求参数
         data = {
             'roomid': room_id,
@@ -154,20 +158,20 @@ class BilibiliDanmakuSender:
                 headers=headers
             )
             result = response.json()
-            
+
             if result['code'] == 0:
-                print(f"弹幕发送成功: {message}")
+                logger.success(f"弹幕发送成功: {message}")
                 return True
             elif result['code'] == 10031:
                 # 发送频率过快，随机等待后重试
                 wait_time = random.uniform(1.0, 3.0)
-                print(f"发送频率过快，等待{wait_time:.1f}秒后重试...")
+                logger.error(f"发送频率过快，等待{wait_time:.1f}秒后重试...")
                 time.sleep(wait_time)
                 return self.send_danmaku(room_id, message, color, mode, fontsize)
             else:
-                print(f"弹幕发送失败 (错误码 {result['code']}): {result.get('message')}")
+                logger.error(f"弹幕发送失败 (错误码 {result['code']}): {result.get('message')}")
                 return False
-        
+
         except Exception as e:
-            print(f"发送弹幕时出错: {str(e)}")
+            logger.error(f"发送弹幕时出错: {str(e)}")
             return False

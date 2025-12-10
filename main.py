@@ -1,13 +1,11 @@
-import re
 import os
 import json
-import random
 import asyncio
-import hashlib
 import traceback
 import aiohttp, http.cookies
 import blivedm.blivedm.models.web as web_models
 
+import log
 import apis
 
 from typing import *
@@ -15,6 +13,9 @@ from nicegui import ui, app
 from blivedm import blivedm
 
 version = "1.0.0"
+
+logger = log.logger
+logger.debug("version: {}", version)
 
 # ================================
 # 初始化配置文件
@@ -29,7 +30,6 @@ example_config = {
     "medal_status": False,
     "sc_status": False,
     "danmu_status": True,
-    "gift_status": False,
     "medal_level": 0.0,
     "sc_level": 30.0
 }
@@ -45,7 +45,7 @@ if not os.path.exists("config.json"):
 
 if not os.path.exists("data/play_list.json"):
     with open("data/play_list.json", "w+", encoding="utf-8") as f:
-        json.dump({"medal": "", "sc": "", "gift": ""}, f, indent=4, ensure_ascii=False)
+        json.dump([], f, indent=4, ensure_ascii=False)
 
 # 加载配置文件
 with open("config.json", "r", encoding="utf-8") as f:
@@ -109,10 +109,56 @@ async def start_handler():
     finally:
         await session.close()
 
-def check_rules(data):
-    ...
+def check_rules(data, data_type: str) -> bool:
+    """
+    检查弹幕是否满足规则
 
-def request_song(song):
+    Args:
+        data: blivedm弹幕数据
+        data_type: 数据类型："danmu"、"sc"
+
+    Returns:
+        bool: 是否满足规则
+    """
+    with open("config.json", "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    if data.admin:
+        return True
+
+    if data_type == "danmu":
+        if config.get("danmu_status", False):
+            if config.get("medal_status", False):
+                if data.medal_level >= config.get("medal_level", 0.0) and data.medal_room_id == int(config.get("room_id", 0)):
+                    return True
+            else:
+                return True
+
+    if data_type == "sc":
+        if config.get("sc_status", False):
+            if data.sc_amount >= config.get("sc_level", 0.0):
+                return True
+
+    # if data_type == "gift":
+    #     if config.get("gift_status", False):
+    #         if data.gift_name in config.get("gift_list", []):
+    #             return True
+
+    
+
+def request_song(song, artist):
+    with open("data/play_list.json", "r", encoding="utf-8") as f:
+        play_list = json.load(f)
+
+    if artist != "":
+        play_list.append(f"{song} - {artist}")
+    else:
+        play_list.append(song)
+
+    with open("data/play_list.json", "w+", encoding="utf-8") as f:
+        json.dump(play_list, f, ensure_ascii=False, indent=4)
+
+def format_songs(data):
     ...
 
 # 获取弹幕信息
@@ -125,8 +171,8 @@ class BiliHandler(blivedm.BaseHandler):
         with open("config.json", "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        if split_msg[0] == "点歌" and check_rules(message):
-            ...
+        if split_msg[0] == "点歌" and check_rules(message, "danmu"):
+            request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "")
 
 async def check_b_connect_status():
     global b_connect_status
@@ -142,7 +188,7 @@ async def check_b_connect_status():
         # 断开连接
         b_connect_status = False
         client.stop() # 断开弹幕服务器ws连接
-        print("弹幕服务器ws连接已断开")
+        logger.info("弹幕服务器ws连接已断开")
         ui.notify("已断开连接，这通常是因为手动关闭了连接或房间号不正确")
         b_connect_switch.set_value(False)
         b_connect_switch.set_text("连接至弹幕服务器")
@@ -196,10 +242,6 @@ def index():
     # GUI界面
     with ui.card(align_items="center").classes("bg-transparent absolute-center").style("box-shadow: None"):
         with ui.card(align_items="center").classes("bg-transparent"):
-            # 按钮组
-            with ui.row():
-                ui.button('修改歌单', on_click=lambda: ui.navigate.to("playlist"), color="")
-
             # 开关组
             with ui.row():
                 with ui.switch("粉丝勋章", on_change=lambda: save_config(config)).bind_value(config, "medal_status"):
@@ -211,16 +253,16 @@ def index():
                 with ui.switch("弹幕点歌", on_change=lambda: save_config(config)).bind_value(config, "danmu_status"):
                     ui.tooltip('是否启用弹幕点歌')
 
-                with ui.switch("礼物点歌", on_change=lambda: save_config(config)).bind_value(config, "gift_status"):
-                    ui.tooltip('是否启用礼物点歌')
+                # with ui.switch("礼物点歌", on_change=lambda: save_config(config)).bind_value(config, "gift_status"):
+                #     ui.tooltip('是否启用礼物点歌')
 
             # 配置项
             with ui.input(label="房间号", on_change=lambda: save_config(config)).bind_value(config, "room_id").style("width: 150px"):
                 ui.tooltip('需连接的房间号')
 
-            with ui.row():
-                with ui.select(label="选择礼物", options=[], on_change=lambda: save_config(config), multiple=True).bind_value(config, "gift_list").style("width: 150px"):
-                    ui.tooltip("送什么礼物可以点歌")
+            # with ui.row():
+            #     with ui.select(label="选择礼物", options=[], on_change=lambda: save_config(config), multiple=True).bind_value(config, "gift_list").style("width: 150px"):
+            #         ui.tooltip("送什么礼物可以点歌")
 
             with ui.row():
                 with ui.number("勋章等级", on_change=lambda: save_config(config), min=0, value=0.0).bind_value(config, "medal_level").style("width: 150px"):
@@ -237,42 +279,6 @@ def index():
             with ui.label(f"obs浏览器源：http://{host}:{port}/show").classes("text-sm italic mt-4").on("click", lambda: ui.clipboard.write(f"http://{host}:{port}/show")).on("click", lambda: ui.notify("已复制至剪贴板", type="info")):
                 ui.tooltip("将此地址添加至obs浏览器源以显示当前点歌，点击复制到剪贴板")
 
-
-@ui.page("/playlist")
-def index():
-    # 打开config.json文件，读取配置
-    with open("config.json", "r", encoding="utf-8") as f:
-        config = json.load(f)
-
-    with open("data/play_list.json", "r", encoding="utf-8") as f:
-        play_list = json.load(f)
-
-    def format_data(data):
-        # 去除多余空格和换行符
-        data = re.sub(r'\n', '', data)
-        # 处理中文逗号
-        data = data.replace('，', ',')
-        return data
-
-    # 保存配置函数
-    def save_config(file, config):
-        # 打开config.json文件，写入配置
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(config, f, ensure_ascii=False, indent=4)
-
-    with ui.card(align_items="center").classes("absolute-center w-2/3").style("height: 90%"):
-        medal_input = ui.textarea(label="粉丝勋章歌单", on_change=lambda: save_config("data/play_list.json", play_list)).classes("w-full h-60").bind_value(play_list, "medal", backward=lambda value: format_data(value))
-
-        sc_input = ui.textarea(label="SC歌单", on_change=lambda: save_config("data/play_list.json", play_list)).classes("w-full h-60").bind_value(play_list, "sc", backward=lambda value: format_data(value))
-
-        gift_input = ui.textarea(label="礼物歌单", on_change=lambda: save_config("data/play_list.json", play_list)).classes("w-full h-60").bind_value(play_list, "gift", backward=lambda value: format_data(value))
-
-        with ui.row(align_items="center"):
-            ui.button("返回", on_click=lambda: ui.navigate.back())
-
-        ui.label("歌单格式：歌名_歌手，逗号分隔")
-
-
 @ui.page("/show")
 def index():
     with open("config.json", "r", encoding="utf-8") as f:
@@ -281,10 +287,13 @@ def index():
     with open("data/play_list.json", "r", encoding="utf-8") as f:
         play_list = json.load(f)
 
-    ui.label(f"当前点歌").classes("text-3xl font-bold")
+    with ui.card(align_items="center").classes("bg-transparent").style("box-shadow: None; left: 50%; transform: translate(-50%, 0%);"): # 居中、背景透明、取消卡片阴影、置顶居中
+        ui.label(f"当前点歌").classes("text-3xl font-bold")
+        
+
 
 
 try:
     ui.run(host=host, port=port, title=f"danbo v{version}", reload=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret")
 except:
-    print(traceback.format_exc())
+    logger.error(traceback.format_exc())
