@@ -9,7 +9,7 @@ import log
 import apis
 
 from typing import *
-from nicegui import ui, app
+from nicegui import ui
 from blivedm import blivedm
 
 version = "1.0.0"
@@ -155,20 +155,33 @@ def check_rules(data, data_type: str):
     except Exception as e:
         return f"规则错误：{e}"
 
-def request_song(song, artist):
+def request_song(song, artist, user):
     with open("data/play_list.json", "r", encoding="utf-8") as f:
         play_list = json.load(f)
 
     if artist != "":
-        play_list.append(f"{song} - {artist}")
+        play_list.append(f"{song} - {artist} - {user}")
     else:
         play_list.append(song)
 
     with open("data/play_list.json", "w+", encoding="utf-8") as f:
         json.dump(play_list, f, ensure_ascii=False, indent=4)
 
-def format_songs(data):
-    ...
+    refresh_show_card()
+
+def create_show_card():
+    with open("data/play_list.json", "r", encoding="utf-8") as f:
+        play_list = json.load(f)
+
+    ui.label(f"当前点歌").classes("text-3xl font-bold")
+
+    for i in play_list:
+        ui.label(i)
+
+def refresh_show_card():
+    show_card.clear()
+    with show_card:
+        create_show_card()
 
 def send_danmaku(msg: str):
     asyncio.create_task(sender.send_danmaku(config.get("room_id", 0), msg))
@@ -198,7 +211,7 @@ class BiliHandler(blivedm.BaseHandler):
         if split_msg[0] == "点歌":
             status = check_rules(message, "danmu")
             if status == True:
-                request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "")
+                request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "", user)
             elif status == False:
                 return
             else:
@@ -215,7 +228,7 @@ class BiliHandler(blivedm.BaseHandler):
         if split_msg[0] == "点歌":
             status = check_rules(message, "sc")
             if status == True:
-                request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "")
+                request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "", user)
             elif status == False:
                 return
             else:
@@ -297,6 +310,7 @@ def index():
                 json.dump(play_list, f, ensure_ascii=False, indent=4)
 
             refresh_card()
+            refresh_show_card()
 
         def create_card():
             with open("data/play_list.json", "r", encoding="utf-8") as f:
@@ -314,75 +328,65 @@ def index():
                 create_card()
 
         # 弹窗
-        with ui.dialog() as play_list_dialog, ui.card(align_items="center").classes("w-1/5"):
+        with ui.dialog() as play_list_dialog, ui.card(align_items="center"):
             with ui.card().classes("w-full") as play_list_card:
                 create_card()
 
         play_list_dialog.open()
 
-# 设置背景
-    ui.query('body').style('background: url("static/bg2.jpg") 0px 0px/cover fixed; background-attachment: fixed;')
-
     # GUI界面
-    with ui.card(align_items="center").classes("bg-transparent absolute-center").style("box-shadow: None"):
-        with ui.card(align_items="center").classes("bg-transparent"):
-            # 按钮组
-            with ui.row():
-                ui.button("登录账号")
-                ui.button("已点列表", on_click=lambda: play_list_dialog())
+    with ui.card(align_items="center").classes("absolute-center"):
+        # 按钮组
+        with ui.row():
+            ui.button("登录账号")
+            ui.button("已点列表", on_click=lambda: play_list_dialog())
 
-            # 开关组
-            with ui.row():
-                with ui.switch("粉丝勋章", on_change=lambda: save_config(config)).bind_value(config, "medal_status"):
-                    ui.tooltip('是否启用粉丝勋章点歌')
+        # 开关组
+        with ui.row():
+            with ui.switch("粉丝勋章", on_change=lambda: save_config(config)).bind_value(config, "medal_status"):
+                ui.tooltip('是否启用粉丝勋章点歌')
 
-                with ui.switch("SC点歌", on_change=lambda: save_config(config)).bind_value(config, "sc_status"):
-                    ui.tooltip('是否启用SC点歌')
-                
-                with ui.switch("弹幕点歌", on_change=lambda: save_config(config)).bind_value(config, "danmu_status"):
-                    ui.tooltip('是否启用弹幕点歌')
+            with ui.switch("SC点歌", on_change=lambda: save_config(config)).bind_value(config, "sc_status"):
+                ui.tooltip('是否启用SC点歌')
+            
+            with ui.switch("弹幕点歌", on_change=lambda: save_config(config)).bind_value(config, "danmu_status"):
+                ui.tooltip('是否启用弹幕点歌')
 
-                # with ui.switch("礼物点歌", on_change=lambda: save_config(config)).bind_value(config, "gift_status"):
-                #     ui.tooltip('是否启用礼物点歌')
+            # with ui.switch("礼物点歌", on_change=lambda: save_config(config)).bind_value(config, "gift_status"):
+            #     ui.tooltip('是否启用礼物点歌')
 
-            # 配置项
-            with ui.input(label="房间号", on_change=lambda: save_config(config)).bind_value(config, "room_id").style("width: 150px"):
-                ui.tooltip('需连接的房间号')
+        # 配置项
+        with ui.input(label="房间号", on_change=lambda: save_config(config)).bind_value(config, "room_id").style("width: 150px"):
+            ui.tooltip('需连接的房间号')
 
-            # with ui.row():
-            #     with ui.select(label="选择礼物", options=[], on_change=lambda: save_config(config), multiple=True).bind_value(config, "gift_list").style("width: 150px"):
-            #         ui.tooltip("送什么礼物可以点歌")
+        # with ui.row():
+        #     with ui.select(label="选择礼物", options=[], on_change=lambda: save_config(config), multiple=True).bind_value(config, "gift_list").style("width: 150px"):
+        #         ui.tooltip("送什么礼物可以点歌")
 
-            with ui.row():
-                with ui.number("勋章等级", on_change=lambda: save_config(config), min=0, value=0.0).bind_value(config, "medal_level").style("width: 150px"):
-                    ui.tooltip("粉丝勋章超过多少级可以点歌，0=无限制")
+        with ui.row():
+            with ui.number("勋章等级", on_change=lambda: save_config(config), min=0, value=0.0).bind_value(config, "medal_level").style("width: 150px"):
+                ui.tooltip("粉丝勋章超过多少级可以点歌，0=无限制")
 
-                with ui.number("SC价格", on_change=lambda: save_config(config), min=0, value=0.0).bind_value(config, "sc_level").style("width: 150px"):
-                    ui.tooltip("SC金额超过多少可以点歌（元），0=无限制")
+            with ui.number("SC价格", on_change=lambda: save_config(config), min=0, value=0.0).bind_value(config, "sc_level").style("width: 150px"):
+                ui.tooltip("SC金额超过多少可以点歌（元），0=无限制")
 
-            # 连接至直播间
-            with ui.row():
-                b_connect_switch = ui.switch("连接至弹幕服务器", on_change=lambda: check_b_connect_status()).props('checked-icon="check" color="green" unchecked-icon="clear"')
+        # 连接至直播间
+        with ui.row():
+            b_connect_switch = ui.switch("连接至弹幕服务器", on_change=lambda: check_b_connect_status()).props('checked-icon="check" color="green" unchecked-icon="clear"')
 
-            # obs浏览器源
-            with ui.label(f"obs浏览器源：http://{host}:{port}/show").classes("text-sm italic mt-4").on("click", lambda: ui.clipboard.write(f"http://{host}:{port}/show")).on("click", lambda: ui.notify("已复制至剪贴板", type="info")):
-                ui.tooltip("将此地址添加至obs浏览器源以显示当前点歌，点击复制到剪贴板")
+        # obs浏览器源
+        with ui.label(f"obs浏览器源：http://{host}:{port}/show").classes("text-sm italic mt-4").on("click", lambda: ui.clipboard.write(f"http://{host}:{port}/show")).on("click", lambda: ui.notify("已复制至剪贴板", type="info")):
+            ui.tooltip("将此地址添加至obs浏览器源以显示当前点歌，点击复制到剪贴板")
 
 @ui.page("/show")
 def index():
-    with open("config.json", "r", encoding="utf-8") as f:
-        config = json.load(f)
+    global show_card
 
-    with open("data/play_list.json", "r", encoding="utf-8") as f:
-        play_list = json.load(f)
-
-    with ui.card(align_items="center").classes("bg-transparent").style("box-shadow: None; left: 50%; transform: translate(-50%, 0%);"): # 居中、背景透明、取消卡片阴影、置顶居中
-        ui.label(f"当前点歌").classes("text-3xl font-bold")
-        for i in play_list:
-            ui.label(i)
+    with ui.card(align_items="center").classes("bg-transparent").style("box-shadow: None; left: 50%; transform: translate(-50%, 0%);") as show_card: # 居中、背景透明、取消卡片阴影、置顶居中
+        create_show_card()
 
 
 try:
-    ui.run(host=host, port=port, title=f"danbo v{version}", reload=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret")
+    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret")
 except:
     logger.error(traceback.format_exc())
