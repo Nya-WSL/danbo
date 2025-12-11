@@ -109,7 +109,7 @@ async def start_handler():
     finally:
         await session.close()
 
-def check_rules(data, data_type: str) -> bool:
+def check_rules(data, data_type: str):
     """
     检查弹幕是否满足规则
 
@@ -118,33 +118,42 @@ def check_rules(data, data_type: str) -> bool:
         data_type: 数据类型："danmu"、"sc"
 
     Returns:
-        bool: 是否满足规则
+        满足规则返回True，不满足会返回错误信息
     """
-    with open("config.json", "r", encoding="utf-8") as f:
-        config = json.load(f)
+    try:
+        with open("config.json", "r", encoding="utf-8") as f:
+            config = json.load(f)
 
-    if data.admin:
-        return True
+        if data.admin:
+            return True
 
-    if data_type == "danmu":
-        if config.get("danmu_status", False):
-            if config.get("medal_status", False):
-                if data.medal_level >= config.get("medal_level", 0.0) and data.medal_room_id == int(config.get("room_id", 0)):
+        if data_type == "danmu":
+            if config.get("danmu_status", False):
+                if config.get("medal_status", False):
+                    if data.medal_level >= config.get("medal_level", 0.0):
+                        if data.medal_room_id == int(config.get("room_id", 0)):
+                            return True
+                        else:
+                            return f"{data.uname}佩戴的勋章不属于当前直播间"
+                    else:
+                        return f'{data.uname}佩戴的勋章等级不足{config.get("medal_level", 0.0)}'
+                else:
                     return True
-            else:
-                return True
 
-    if data_type == "sc":
-        if config.get("sc_status", False):
-            if data.sc_amount >= config.get("sc_level", 0.0):
-                return True
+        if data_type == "sc":
+            if config.get("sc_status", False):
+                if data.price >= config.get("sc_level", 0.0):
+                    return True
+                else:
+                    return f'SC不足￥{config.get("sc_level", 0.0)}'
 
-    # if data_type == "gift":
-    #     if config.get("gift_status", False):
-    #         if data.gift_name in config.get("gift_list", []):
-    #             return True
+        # if data_type == "gift":
+        #     if config.get("gift_status", False):
+        #         if data.gift_name in config.get("gift_list", []):
+        #             return True
 
-    
+    except Exception as e:
+        return f"规则错误：{e}"
 
 def request_song(song, artist):
     with open("data/play_list.json", "r", encoding="utf-8") as f:
@@ -161,22 +170,63 @@ def request_song(song, artist):
 def format_songs(data):
     ...
 
+def send_danmaku(msg: str):
+    asyncio.create_task(sender.send_danmaku(config.get("room_id", 0), msg))
+
 # 获取弹幕信息
 class BiliHandler(blivedm.BaseHandler):
+    heart_count = 0
+    # 心跳数据
+    def _on_heartbeat(self, client: blivedm.BLiveClient, message: web_models.HeartbeatMessage):
+        self.heart_count += 1
+        logger.info("触发心跳")
+        if self.heart_count == 1:
+            b_connect_switch.set_value(True)
+            b_connect_switch.set_text("已连接弹幕服务器")
+            logger.info(f"已连接至{client.room_id}")
+
     def _on_danmaku(self, client: blivedm.BLiveClient, message: web_models.DanmakuMessage):
         user = message.uname
         msg = message.msg
         split_msg = msg.split(" ")
 
+        logger.debug(f"DANMAKU: {user}: {msg}")
+
         with open("config.json", "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        if split_msg[0] == "点歌" and check_rules(message, "danmu"):
-            request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "")
+        if split_msg[0] == "点歌":
+            status = check_rules(message, "danmu")
+            if status == True:
+                request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "")
+            elif status == False:
+                return
+            else:
+                send_danmaku(status)
+
+    def _on_super_chat(self, client: blivedm.BLiveClient, message: web_models.SuperChatMessage):
+        price = message.price
+        user = message.uname
+        msg = message.message
+        split_msg = msg.split(" ")
+
+        logger.debug(f"SC: {user}: {msg} ￥{price}")
+
+        if split_msg[0] == "点歌":
+            status = check_rules(message, "sc")
+            if status == True:
+                request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "")
+            elif status == False:
+                return
+            else:
+                send_danmaku(status)
 
 async def check_b_connect_status():
     global b_connect_status
     switch_value = b_connect_switch.value
+
+    with open("config.json", "r", encoding="utf-8") as f:
+        config = json.load(f)
 
     # 开关关闭状态：断开连接
     if switch_value == False:
@@ -236,12 +286,51 @@ def index():
         with open("config.json", "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
 
+    def play_list_dialog():
+        def del_song(song):
+            with open("data/play_list.json", "r", encoding="utf-8") as f:
+                play_list = json.load(f)
+
+            play_list.remove(song)
+
+            with open("data/play_list.json", "w+", encoding="utf-8") as f:
+                json.dump(play_list, f, ensure_ascii=False, indent=4)
+
+            refresh_card()
+
+        def create_card():
+            with open("data/play_list.json", "r", encoding="utf-8") as f:
+                play_list = json.load(f)
+
+            for i in play_list:
+                with ui.row().classes("w-full"):
+                    ui.label(i)
+                    ui.space()
+                    ui.button("删除", on_click=lambda i = i: del_song(i))
+
+        def refresh_card():
+            play_list_card.clear()
+            with play_list_card:
+                create_card()
+
+        # 弹窗
+        with ui.dialog() as play_list_dialog, ui.card(align_items="center").classes("w-1/5"):
+            with ui.card().classes("w-full") as play_list_card:
+                create_card()
+
+        play_list_dialog.open()
+
 # 设置背景
     ui.query('body').style('background: url("static/bg2.jpg") 0px 0px/cover fixed; background-attachment: fixed;')
 
     # GUI界面
     with ui.card(align_items="center").classes("bg-transparent absolute-center").style("box-shadow: None"):
         with ui.card(align_items="center").classes("bg-transparent"):
+            # 按钮组
+            with ui.row():
+                ui.button("登录账号")
+                ui.button("已点列表", on_click=lambda: play_list_dialog())
+
             # 开关组
             with ui.row():
                 with ui.switch("粉丝勋章", on_change=lambda: save_config(config)).bind_value(config, "medal_status"):
@@ -289,8 +378,8 @@ def index():
 
     with ui.card(align_items="center").classes("bg-transparent").style("box-shadow: None; left: 50%; transform: translate(-50%, 0%);"): # 居中、背景透明、取消卡片阴影、置顶居中
         ui.label(f"当前点歌").classes("text-3xl font-bold")
-        
-
+        for i in play_list:
+            ui.label(i)
 
 
 try:
