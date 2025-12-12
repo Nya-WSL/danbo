@@ -70,7 +70,7 @@ class BilibiliDanmakuSender:
         except Exception as e:
             logger.error(f"获取弹幕配置时出错: {str(e)}")
             return None
-    
+
     def set_danmaku_style(self, room_id, color_hex=None, mode=None):
         """
         设置弹幕样式

@@ -1,16 +1,23 @@
 import os
 import json
 import asyncio
+import requests
 import traceback
 import aiohttp, http.cookies
 import blivedm.blivedm.models.web as web_models
 
 import log
 import apis
+import ping
+import update as danbo_update
+import bili_auth_web as bili_auth
+
+from changelog import get_log
 
 from typing import *
 from nicegui import ui
 from blivedm import blivedm
+from itertools import islice
 
 version = "1.0.0"
 
@@ -24,14 +31,15 @@ logger.debug("version: {}", version)
 example_config = {
     "room_id": "",
     "host": "127.0.0.1",
-    "port": 65020,
+    "port": 65100,
     "SESSDATA": "",
     "bili_jct": "",
     "medal_status": False,
     "sc_status": False,
     "danmu_status": True,
     "medal_level": 0.0,
-    "sc_level": 30.0
+    "sc_level": 30.0,
+    "cwd": ""
 }
 
 if not os.path.exists("data"):
@@ -71,11 +79,6 @@ with open("config.json", "w", encoding="utf-8") as f:
 host = config["host"]
 port = config["port"]
 
-# 用户配置
-ROOM_ID = config["room_id"]
-SESSDATA = config["SESSDATA"]
-BILI_JCT = config["bili_jct"]
-
 b_connect_status = False
 
 async def start_handler():
@@ -85,6 +88,13 @@ async def start_handler():
 
     # 创建ws
     try:
+        with open("config.json", "r", encoding="utf-8") as f:
+            config = json.load(f)
+        # 用户配置
+        ROOM_ID = config["room_id"]
+        SESSDATA = config["SESSDATA"]
+        BILI_JCT = config["bili_jct"]
+
         cookies = http.cookies.SimpleCookie()
         cookies['SESSDATA'] = SESSDATA
         cookies['SESSDATA']['domain'] = 'bilibili.com'
@@ -109,7 +119,7 @@ async def start_handler():
     finally:
         await session.close()
 
-def check_rules(data, data_type: str):
+def check_rules(data, data_type: str) -> bool | str:
     """
     检查弹幕是否满足规则
 
@@ -130,13 +140,13 @@ def check_rules(data, data_type: str):
         if data_type == "danmu":
             if config.get("danmu_status", False):
                 if config.get("medal_status", False):
-                    if data.medal_level >= config.get("medal_level", 0.0):
-                        if data.medal_room_id == int(config.get("room_id", 0)):
+                    if data.medal_room_id == int(config.get("room_id", 0)):
+                        if data.medal_level >= config.get("medal_level", 0.0):
                             return True
                         else:
-                            return f"{data.uname}佩戴的勋章不属于当前直播间"
+                            return f'{data.uname}佩戴的勋章等级不足{int(config.get("medal_level", 0.0))}'
                     else:
-                        return f'{data.uname}佩戴的勋章等级不足{config.get("medal_level", 0.0)}'
+                        return f"{data.uname}佩戴的勋章不属于当前直播间"
                 else:
                     return True
 
@@ -160,6 +170,8 @@ def request_song(song, artist, user):
         play_list = json.load(f)
 
     if artist != "":
+        if len(user) > 8:
+            user = user[:5] + "..."
         play_list.append(f"{song} - {artist} - {user}")
     else:
         play_list.append(song)
@@ -184,7 +196,9 @@ def refresh_show_card():
         create_show_card()
 
 def send_danmaku(msg: str):
-    asyncio.create_task(sender.send_danmaku(config.get("room_id", 0), msg))
+    with open("config.json", "r", encoding="utf-8") as f:
+        config = json.load(f)
+    sender.send_danmaku(config.get("room_id", 0), msg)
 
 # 获取弹幕信息
 class BiliHandler(blivedm.BaseHandler):
@@ -204,9 +218,6 @@ class BiliHandler(blivedm.BaseHandler):
         split_msg = msg.split(" ")
 
         logger.debug(f"DANMAKU: {user}: {msg}")
-
-        with open("config.json", "r", encoding="utf-8") as f:
-            config = json.load(f)
 
         if split_msg[0] == "点歌":
             status = check_rules(message, "danmu")
@@ -266,6 +277,10 @@ async def check_b_connect_status():
 
         # 启动连接
         if not b_connect_status:
+            if not config.get("SESSDATA", "") and not config.get("bili_jct", ""):
+                ui.notify("未登录B站账号，无法连接弹幕服务器", type="negative")
+                b_connect_switch.set_value(False)
+                return
             asyncio.create_task(start_handler())
             b_connect_switch.set_value("null")
             b_connect_switch.set_text("尝试连接弹幕服务器")
@@ -334,12 +349,127 @@ def index():
 
         play_list_dialog.open()
 
+    def check_auth(loginInfo):
+        status = bili_auth.login(loginInfo[0])
+
+        if status == True:
+            ui.notify("登录成功", type="positive")
+            try:
+                os.remove(loginInfo[1])
+            except:
+                logger.warning(f"删除{loginInfo[1]}失败")
+
+        else:
+            ui.notify(status, type="negative")
+
+    def bili_login():
+        if config["room_id"] == "":
+            ui.notify("请先填入房间号", type="negative")
+            return
+
+        loginInfo = bili_auth.get_qrcode("bili_qrcode")
+
+        with ui.dialog() as auth_dialog, ui.card(align_items="center"):
+            qrcode_ui = ui.image(loginInfo[1])
+            ui.label("请使用B站APP扫描二维码登录")
+            qr_button = ui.button("已扫码", on_click=lambda: check_auth(loginInfo))
+            qr_button.on_click(lambda: auth_dialog.close())
+
+        auth_dialog.open()
+        auth_dialog.on("hide", lambda: os.remove(loginInfo[1]))
+
+    async def ping_server():
+        servers = {
+            "GitHub": "github.com",
+            "CN-HK": "travail.nya-wsl.com",
+            "CN-QN": "qn.nya-wsl.cn"
+        }
+        server = await ping.ping(servers.values())
+        if server != False:
+            for k, v in servers.items():
+                if v == server:
+                    return k
+        else:
+            return False
+
+    def get_version():
+        logs = get_log()
+        version_flag = False
+        num = 0
+
+        if logs != {}:
+            for i in logs.keys():
+                if not version_flag:
+                    num += 1
+                if i == version:
+                    version_flag = True
+            return dict(islice(logs.items(), num - 1))
+        else:
+            return {}
+
+    # 检查版本更新按钮
+    async def check_update():
+        async def update(server, status):
+            if server == "auto":
+                ui.notify(f"测速中，请稍候...", progress=True, timeout=3000, type="ongoing", color="blue-100")
+                server = await ping_server()
+                if server == False:
+                    ui.notify("无法连接更新服务器", type="negative")
+                    return
+
+            await danbo_update.update(server, status) # 调用更新函数
+
+        def version_dialog():
+            with ui.dialog() as dialog, ui.card(align_items="center"):
+                ui.label(f"当前版本：{version} | 最新版本：{status}")
+                server_select = ui.select(options={"CN-HK": "国内源", "CN-QN": "国内备用源", "GitHub": "GitHub", "auto": "自动检测"}, label="选择更新源", value="auto").classes("w-1/2")
+                ui.button("更新", on_click=lambda: update(server_select.value, status))
+                for k,v in get_version().items():
+                    with ui.timeline(side="right", layout="dense", color="btn"):
+                        with ui.timeline_entry(title=f"Release of {k}", subtitle=v["date"]):
+                            with ui.column().classes("gap-3"):
+                                for item in v["content"]:
+                                    ui.label(f"● {item}")
+
+            dialog.open()
+
+        def version_check():
+            url = ["http://version.nya-wsl.cn/danbo/version.json"]
+            try:
+                response = requests.get(url[0]) # 优先从Nya-WSL中国服务器获取版本信息
+                if response.status_code == 200:
+                    data = response.json()
+                    latest_version = data["version"]
+                else:
+                    raise ValueError("From Nya-WSL CN to get version info was error") # 抛出错误
+            except Exception as e:
+                logger.error(e)
+                latest_version = "Error" # 如果请求均失败版本信息设为"Error"
+
+            return latest_version
+
+        status = version_check()
+
+        if status != version:
+            if status != "Error":
+                with main_card:
+                    version_dialog()
+            else:
+                with main_card:
+                    ui.notify("检查更新失败", type="negative")
+        else:
+            with main_card:
+                ui.notify("已是最新版本", type="positive")
+
     # GUI界面
-    with ui.card(align_items="center").classes("absolute-center"):
+    with ui.card(align_items="center").classes("absolute-center").style("width: 95%") as main_card:
+        asyncio.create_task(check_update())
+
         # 按钮组
         with ui.row():
-            ui.button("登录账号")
+            ui.button("登录账号", on_click=lambda: bili_login())
             ui.button("已点列表", on_click=lambda: play_list_dialog())
+            ui.button("检查更新", on_click=lambda: check_update())
 
         # 开关组
         with ui.row():
@@ -387,6 +517,6 @@ def index():
 
 
 try:
-    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret")
+    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret", window_size=[500, 450])
 except:
     logger.error(traceback.format_exc())

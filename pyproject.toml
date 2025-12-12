@@ -18,7 +18,8 @@ dependencies = [
     "aiohttp (>=3.12.15,<4.0.0)",
     "pure-protobuf (==3.1.2)",
     "loguru (>=0.7.3,<0.8.0)",
-    "pywebview (>=6.1,<7.0)"
+    "pywebview (>=6.1,<7.0)",
+    "aioping (>=0.4.0,<0.5.0)",
 ]
 
 
