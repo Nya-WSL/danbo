@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import asyncio
 import requests
@@ -18,7 +19,7 @@ from nicegui import ui
 from blivedm import blivedm
 from itertools import islice
 
-version = "1.1.0"
+version = "1.2.0"
 
 logger = log.logger
 logger.debug("version: {}", version)
@@ -38,6 +39,8 @@ example_config = {
     "danmu_status": True,
     "medal_level": 0.0,
     "sc_level": 30.0,
+    "stop_status": False,
+    "guard_status": False,
     "song_font_size": "text-5xl",
     "cwd": ""
 }
@@ -53,6 +56,10 @@ if not os.path.exists("config.json"):
 
 if not os.path.exists("data/play_list.json"):
     with open("data/play_list.json", "w+", encoding="utf-8") as f:
+        json.dump([], f, indent=4, ensure_ascii=False)
+
+if not os.path.exists("data/black_list.json"):
+    with open("data/black_list.json", "w+", encoding="utf-8") as f:
         json.dump([], f, indent=4, ensure_ascii=False)
 
 # 加载配置文件
@@ -128,18 +135,35 @@ def check_rules(data, data_type: str, owner_uid: int = None) -> bool | str:
         data_type: 数据类型："danmu"、"sc"
 
     Returns:
-        满足规则返回True，不满足会返回错误信息
+        满足规则返回True，不满足会返回错误信息，返回False表示忽略该请求
     """
     try:
         with open("config.json", "r", encoding="utf-8") as f:
             config = json.load(f)
 
+        if config.get("stop_status", False):
+            logger.info("点歌已被停止，忽略请求")
+            return False
+
         if owner_uid != None:
             if data.uid == owner_uid:
                 return True
 
-        if data.admin or data.privilege_type != 0:
+        if data.admin:
             return True
+
+        with open("data/black_list.json", "r", encoding="utf-8") as f:
+            black_list = json.load(f)
+
+        song = data.msg.split(" ")[1]
+
+        for i in black_list:
+            if re.search(i, song):
+                return f"{song}在黑名单中"
+
+        if config.get("guard_status", False):
+            if data.guard_level != 0:
+                return True
 
         if data_type == "danmu":
             if config.get("danmu_status", False):
@@ -178,7 +202,7 @@ def request_song(song, artist, user):
             user = user[:5] + "..."
         play_list.append(f"{song} - {artist} - {user}")
     else:
-        play_list.append(song)
+        play_list.append(f"{song} - {user}")
 
     with open("data/play_list.json", "w+", encoding="utf-8") as f:
         json.dump(play_list, f, ensure_ascii=False, indent=4)
@@ -189,10 +213,16 @@ def create_show_card():
     with open("data/play_list.json", "r", encoding="utf-8") as f:
         play_list = json.load(f)
 
-    ui.label(f"当前点歌").classes(f"{song_font_size_select.value} font-bold")
+    with open("config.json", "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    if config.get("stop_status", False):
+        ui.label("当前不允许点歌").classes(f"{config.get("song_font_size", "text-5xl")} font-bold text-red-600")
+    else:
+        ui.label(f"当前点歌").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
 
     for i in play_list:
-        ui.label(i).classes(f"{song_font_size_select.value} font-bold")
+        ui.label(i).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
 
 def refresh_show_card():
     show_card.clear()
@@ -235,16 +265,14 @@ class BiliHandler(blivedm.BaseHandler):
 
         if split_msg[0] == "删除":
             if message.admin or message.uid == owner_uid:
-                if isinstance(split_msg[1], int):
-                    with open("data/play_list.json", "r", encoding="utf-8") as f:
-                        play_list = json.load(f)
+                with open("data/play_list.json", "r", encoding="utf-8") as f:
+                    play_list = json.load(f)
 
-                    play_list.pop(int(split_msg[1]) - 1)
+                play_list.pop(int(split_msg[1]) - 1)
 
-                    with open("data/play_list.json", "w+", encoding="utf-8") as f:
-                        json.dump(play_list, f, indent=4, ensure_ascii=False)
-                else:
-                    logger.error("传入的歌单序号不是int类型")
+                with open("data/play_list.json", "w+", encoding="utf-8") as f:
+                    json.dump(play_list, f, indent=4, ensure_ascii=False)
+                refresh_show_card()
 
     def _on_super_chat(self, client: blivedm.BLiveClient, message: web_models.SuperChatMessage):
         price = message.price
@@ -320,21 +348,23 @@ async def check_b_connect_status():
 # 管理面板
 @ui.page('/')
 def index():
-    global b_connect_switch, song_font_size_select
+    global b_connect_switch
     # 打开config.json文件，读取配置
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
 
     # 保存配置函数
-    def save_config(config):
-        with open("config.json", "r", encoding="utf-8") as f:
-            old_config = json.load(f)
-        for k in old_config:
-            if k in config:
-                old_config[k] = config[k]
-        # 打开config.json文件，写入配置
-        with open("config.json", "w", encoding="utf-8") as f:
-            json.dump(old_config, f, ensure_ascii=False, indent=4)
+    def save_config(config, file = "config.json"):
+        if file == "config.json":
+            with open(file, "r", encoding="utf-8") as f:
+                old_config = json.load(f)
+            for k in old_config:
+                if k in config:
+                    old_config[k] = config[k]
+            config = old_config
+
+        with open(file, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=4)
 
     def play_list_dialog():
         def del_song(song):
@@ -355,7 +385,7 @@ def index():
 
             for i in play_list:
                 with ui.row().classes("w-full"):
-                    ui.label(i).on("click", lambda: ui.clipboard.write(i.split(" - ")[0])).on("click", lambda: ui.notify("已复制至剪贴板", type="info"))
+                    ui.label(i).on("click", lambda i = i: ui.clipboard.write(i.split(" - ")[0])).on("click", lambda: ui.notify("已复制至剪贴板", type="info"))
                     ui.space()
                     ui.button("删除", on_click=lambda i = i: del_song(i))
 
@@ -370,6 +400,16 @@ def index():
                 create_card()
 
         play_list_dialog.open()
+
+    def black_list_dialog():
+        # 弹窗
+        with open("data/black_list.json", "r", encoding="utf-8") as f:
+            black_list = json.load(f)
+
+        with ui.dialog() as black_list_dialog, ui.card(align_items="center"):
+            ui.textarea(label="黑名单（每行一个）", value="\n".join(black_list), on_change=lambda v: save_config(v.value.splitlines(), "data/black_list.json")).style("width: 400px")
+
+        black_list_dialog.open()
 
     def check_auth(loginInfo):
         status = bili_auth.login(loginInfo[0])
@@ -469,6 +509,7 @@ def index():
         with ui.row():
             ui.button("登录账号", on_click=lambda: bili_login())
             ui.button("已点列表", on_click=lambda: play_list_dialog())
+            ui.button("黑名单", on_click=lambda: black_list_dialog())
             ui.button("检查更新", on_click=lambda: check_update())
 
         # 开关组
@@ -478,9 +519,16 @@ def index():
 
             with ui.switch("SC点歌", on_change=lambda v: save_config({"sc_status": v.value})).bind_value(config, "sc_status"):
                 ui.tooltip('是否启用SC点歌')
-            
+
             with ui.switch("弹幕点歌", on_change=lambda v: save_config({"danmu_status": v.value})).bind_value(config, "danmu_status"):
                 ui.tooltip('是否启用弹幕点歌')
+
+        with ui.row():
+            with ui.switch("舰长点歌", on_change=lambda v: save_config({"guard_status": v.value})).bind_value(config, "guard_status"):
+                ui.tooltip('启用后舰长点歌无视规则，停止点歌除外')
+
+            with ui.switch("停止点歌", on_change=lambda v: save_config({"stop_status": v.value})).on_value_change(lambda: refresh_show_card()).bind_value(config, "stop_status"):
+                ui.tooltip('是否停用点歌，启用后将不会响应任何点歌请求')
 
             # with ui.switch("礼物点歌", on_change=lambda: save_config(config)).bind_value(config, "gift_status"):
             #     ui.tooltip('是否启用礼物点歌')
@@ -536,6 +584,6 @@ def index():
 
 
 try:
-    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret", window_size=[500, 450])
+    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret", window_size=[500, 500])
 except:
     logger.error(traceback.format_exc())

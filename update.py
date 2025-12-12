@@ -65,7 +65,7 @@ timeout /t 1 /nobreak
 robocopy update ./ /E /UNILOG:logs\update.log /NP /NS /V /TEE
 rmdir /s /q update
 rmdir /s /q cache
-start start.exe
+start danbo.exe
 timeout /t 1 /nobreak
 """)
         os.system("update.bat")
