@@ -155,10 +155,10 @@ def check_rules(data, data_type: str, owner_uid: int = None) -> bool | str:
         with open("data/black_list.json", "r", encoding="utf-8") as f:
             black_list = json.load(f)
 
-        song = data.msg.split(" ")[1]
+        song = " ".join(data.msg.split(" ")[1:]).strip()
 
         for i in black_list:
-            if re.search(i, song):
+            if re.search(i, song, re.I): # 大小写不敏感
                 return f"{song}在黑名单中"
 
         if config.get("guard_status", False):
@@ -221,13 +221,20 @@ def create_show_card():
     else:
         ui.label(f"当前点歌").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
 
+    ui.html("<br/><br/>", sanitize=False)
+
     for i in play_list:
         ui.label(i).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
 
 def refresh_show_card():
-    show_card.clear()
-    with show_card:
-        create_show_card()
+    try:
+        show_card.clear()
+
+        with show_card:
+            create_show_card()
+
+    except NameError:
+        logger.warning("show_card未创建，跳过刷新")
 
 def send_danmaku(msg: str):
     with open("config.json", "r", encoding="utf-8") as f:
@@ -525,7 +532,7 @@ def index():
 
         with ui.row():
             with ui.switch("舰长点歌", on_change=lambda v: save_config({"guard_status": v.value})).bind_value(config, "guard_status"):
-                ui.tooltip('启用后舰长点歌无视规则，停止点歌除外')
+                ui.tooltip('启用后舰长点歌无视规则，黑名单和停止点歌除外')
 
             with ui.switch("停止点歌", on_change=lambda v: save_config({"stop_status": v.value})).on_value_change(lambda: refresh_show_card()).bind_value(config, "stop_status"):
                 ui.tooltip('是否停用点歌，启用后将不会响应任何点歌请求')
@@ -575,6 +582,8 @@ def index():
         with ui.label(f"obs浏览器源：http://{host}:{port}/show").classes("text-sm italic mt-4").on("click", lambda: ui.clipboard.write(f"http://{host}:{port}/show")).on("click", lambda: ui.notify("已复制至剪贴板", type="info")):
             ui.tooltip("将此地址添加至obs浏览器源以显示当前点歌，点击复制到剪贴板")
 
+        ui.badge(text="更新日志", outline=True).on("click", lambda: ui.navigate.to("http://version.nya-wsl.cn/danbo/changelog.json", new_tab=True)).classes("gap-0")
+
 @ui.page("/show")
 def index():
     global show_card
@@ -584,6 +593,6 @@ def index():
 
 
 try:
-    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret", window_size=[500, 500])
+    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret", window_size=[500, 520])
 except:
     logger.error(traceback.format_exc())

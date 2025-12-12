@@ -185,3 +185,5 @@ data/play_list.json
 .vscode/settings.json
 /.nicegui
 data/black_list.json
+*.zip
+bili_qrcode_*.png

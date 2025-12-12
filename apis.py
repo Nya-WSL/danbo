@@ -169,7 +169,7 @@ class BilibiliDanmakuSender:
                 time.sleep(wait_time)
                 return self.send_danmaku(room_id, message, color, mode, fontsize)
             else:
-                logger.error(f"弹幕发送失败 (错误码 {result['code']}): {result.get('message')}")
+                logger.error(f"弹幕({message})发送失败 (错误码 {result['code']}): {result.get('message')}")
                 return False
 
         except Exception as e:
