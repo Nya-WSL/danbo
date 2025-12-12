@@ -18,7 +18,7 @@ from nicegui import ui
 from blivedm import blivedm
 from itertools import islice
 
-version = "1.0.0"
+version = "1.1.0"
 
 logger = log.logger
 logger.debug("version: {}", version)
@@ -38,6 +38,7 @@ example_config = {
     "danmu_status": True,
     "medal_level": 0.0,
     "sc_level": 30.0,
+    "song_font_size": "text-5xl",
     "cwd": ""
 }
 
@@ -118,7 +119,7 @@ async def start_handler():
     finally:
         await session.close()
 
-def check_rules(data, data_type: str) -> bool | str:
+def check_rules(data, data_type: str, owner_uid: int = None) -> bool | str:
     """
     检查弹幕是否满足规则
 
@@ -133,7 +134,11 @@ def check_rules(data, data_type: str) -> bool | str:
         with open("config.json", "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        if data.admin:
+        if owner_uid != None:
+            if data.uid == owner_uid:
+                return True
+
+        if data.admin or data.privilege_type != 0:
             return True
 
         if data_type == "danmu":
@@ -184,10 +189,10 @@ def create_show_card():
     with open("data/play_list.json", "r", encoding="utf-8") as f:
         play_list = json.load(f)
 
-    ui.label(f"当前点歌").classes("text-3xl font-bold")
+    ui.label(f"当前点歌").classes(f"{song_font_size_select.value} font-bold")
 
     for i in play_list:
-        ui.label(i)
+        ui.label(i).classes(f"{song_font_size_select.value} font-bold")
 
 def refresh_show_card():
     show_card.clear()
@@ -215,17 +220,31 @@ class BiliHandler(blivedm.BaseHandler):
         user = message.uname
         msg = message.msg
         split_msg = msg.split(" ")
+        owner_uid = client.room_owner_uid
 
         logger.debug(f"DANMAKU: {user}: {msg}")
 
         if split_msg[0] == "点歌":
-            status = check_rules(message, "danmu")
+            status = check_rules(message, "danmu", owner_uid)
             if status == True:
                 request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "", user)
             elif status == False:
                 return
             else:
                 send_danmaku(status)
+
+        if split_msg[0] == "删除":
+            if message.admin or message.uid == owner_uid:
+                if isinstance(split_msg[1], int):
+                    with open("data/play_list.json", "r", encoding="utf-8") as f:
+                        play_list = json.load(f)
+
+                    play_list.pop(int(split_msg[1]) - 1)
+
+                    with open("data/play_list.json", "w+", encoding="utf-8") as f:
+                        json.dump(play_list, f, indent=4, ensure_ascii=False)
+                else:
+                    logger.error("传入的歌单序号不是int类型")
 
     def _on_super_chat(self, client: blivedm.BLiveClient, message: web_models.SuperChatMessage):
         price = message.price
@@ -301,7 +320,7 @@ async def check_b_connect_status():
 # 管理面板
 @ui.page('/')
 def index():
-    global b_connect_switch
+    global b_connect_switch, song_font_size_select
     # 打开config.json文件，读取配置
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -336,7 +355,7 @@ def index():
 
             for i in play_list:
                 with ui.row().classes("w-full"):
-                    ui.label(i)
+                    ui.label(i).on("click", lambda: ui.clipboard.write(i.split(" - ")[0])).on("click", lambda: ui.notify("已复制至剪贴板", type="info"))
                     ui.space()
                     ui.button("删除", on_click=lambda i = i: del_song(i))
 
@@ -467,8 +486,27 @@ def index():
             #     ui.tooltip('是否启用礼物点歌')
 
         # 配置项
-        with ui.input(label="房间号", on_change=lambda v: save_config({"room_id": v.value})).bind_value(config, "room_id").style("width: 150px"):
-            ui.tooltip('需连接的房间号')
+        with ui.row():
+            with ui.input(label="房间号", on_change=lambda v: save_config({"room_id": v.value})).bind_value(config, "room_id").style("width: 150px"):
+                ui.tooltip('需连接的房间号')
+
+            font_size_list = [
+                'text-xs',     # 0.75rem (12px)
+                'text-sm',     # 0.875rem (14px)
+                'text-base',   # 1rem (16px)
+                'text-lg',     # 1.125rem (18px)
+                'text-xl',     # 1.25rem (20px)
+                'text-2xl',    # 1.5rem (24px)
+                'text-3xl',    # 1.875rem (30px)
+                'text-4xl',    # 2.25rem (36px)
+                'text-5xl',    # 3rem (48px)
+                'text-6xl',    # 3.75rem (60px)
+                'text-7xl',    # 4.5rem (72px)
+                'text-8xl',    # 6rem (96px)
+                'text-9xl',    # 8rem (128px)
+                ]
+
+            song_font_size_select = ui.select(label="歌名字体", options=font_size_list, on_change=lambda v: save_config({"song_font_size": v.value})).on_value_change(lambda: refresh_show_card()).bind_value(config, "song_font_size").style("width: 150px")
 
         # with ui.row():
         #     with ui.select(label="选择礼物", options=[], on_change=lambda: save_config(config), multiple=True).bind_value(config, "gift_list").style("width: 150px"):
@@ -478,8 +516,8 @@ def index():
             with ui.number("勋章等级", on_change=lambda v: save_config({"medal_level": v.value}), min=0, value=0.0).bind_value(config, "medal_level").style("width: 150px"):
                 ui.tooltip("粉丝勋章超过多少级可以点歌，0=无限制")
 
-            with ui.number("SC价格", on_change=lambda v : save_config({"sc_level": v.value}), min=0, value=0.0).bind_value(config, "sc_level").style("width: 150px"):
-                ui.tooltip("SC金额超过多少可以点歌（元），0=无限制")
+            with ui.number("SC价格", on_change=lambda v : save_config({"sc_level": v.value}), min=30, value=0.0).bind_value(config, "sc_level").style("width: 150px"):
+                ui.tooltip("SC金额超过多少可以点歌（元），最低30")
 
         # 连接至直播间
         with ui.row():
