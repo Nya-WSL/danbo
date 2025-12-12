@@ -8,7 +8,6 @@ import blivedm.blivedm.models.web as web_models
 
 import log
 import apis
-import ping
 import update as danbo_update
 import bili_auth_web as bili_auth
 
@@ -301,7 +300,6 @@ async def check_b_connect_status():
 
 # 管理面板
 @ui.page('/')
-@ui.page('/nicegui/')
 def index():
     global b_connect_switch
     # 打开config.json文件，读取配置
@@ -310,9 +308,14 @@ def index():
 
     # 保存配置函数
     def save_config(config):
+        with open("config.json", "r", encoding="utf-8") as f:
+            old_config = json.load(f)
+        for k in old_config:
+            if k in config:
+                old_config[k] = config[k]
         # 打开config.json文件，写入配置
         with open("config.json", "w", encoding="utf-8") as f:
-            json.dump(config, f, ensure_ascii=False, indent=4)
+            json.dump(old_config, f, ensure_ascii=False, indent=4)
 
     def play_list_dialog():
         def del_song(song):
@@ -376,21 +379,6 @@ def index():
             qr_button.on_click(lambda: auth_dialog.close())
 
         auth_dialog.open()
-        auth_dialog.on("hide", lambda: os.remove(loginInfo[1]))
-
-    async def ping_server():
-        servers = {
-            "GitHub": "github.com",
-            "CN-HK": "travail.nya-wsl.com",
-            "CN-QN": "qn.nya-wsl.cn"
-        }
-        server = await ping.ping(servers.values())
-        if server != False:
-            for k, v in servers.items():
-                if v == server:
-                    return k
-        else:
-            return False
 
     def get_version():
         logs = get_log()
@@ -410,19 +398,12 @@ def index():
     # 检查版本更新按钮
     async def check_update():
         async def update(server, status):
-            if server == "auto":
-                ui.notify(f"测速中，请稍候...", progress=True, timeout=3000, type="ongoing", color="blue-100")
-                server = await ping_server()
-                if server == False:
-                    ui.notify("无法连接更新服务器", type="negative")
-                    return
-
             await danbo_update.update(server, status) # 调用更新函数
 
         def version_dialog():
             with ui.dialog() as dialog, ui.card(align_items="center"):
                 ui.label(f"当前版本：{version} | 最新版本：{status}")
-                server_select = ui.select(options={"CN-HK": "国内源", "CN-QN": "国内备用源", "GitHub": "GitHub", "auto": "自动检测"}, label="选择更新源", value="auto").classes("w-1/2")
+                server_select = ui.select(options={"CN-HK": "国内源", "CN-QN": "国内备用源", "GitHub": "GitHub"}, label="选择更新源", value="CN-HK").classes("w-1/2")
                 ui.button("更新", on_click=lambda: update(server_select.value, status))
                 for k,v in get_version().items():
                     with ui.timeline(side="right", layout="dense", color="btn"):
@@ -473,20 +454,20 @@ def index():
 
         # 开关组
         with ui.row():
-            with ui.switch("粉丝勋章", on_change=lambda: save_config(config)).bind_value(config, "medal_status"):
+            with ui.switch("粉丝勋章", on_change=lambda v: save_config({"medal_status": v.value})).bind_value(config, "medal_status"):
                 ui.tooltip('是否启用粉丝勋章点歌')
 
-            with ui.switch("SC点歌", on_change=lambda: save_config(config)).bind_value(config, "sc_status"):
+            with ui.switch("SC点歌", on_change=lambda v: save_config({"sc_status": v.value})).bind_value(config, "sc_status"):
                 ui.tooltip('是否启用SC点歌')
             
-            with ui.switch("弹幕点歌", on_change=lambda: save_config(config)).bind_value(config, "danmu_status"):
+            with ui.switch("弹幕点歌", on_change=lambda v: save_config({"danmu_status": v.value})).bind_value(config, "danmu_status"):
                 ui.tooltip('是否启用弹幕点歌')
 
             # with ui.switch("礼物点歌", on_change=lambda: save_config(config)).bind_value(config, "gift_status"):
             #     ui.tooltip('是否启用礼物点歌')
 
         # 配置项
-        with ui.input(label="房间号", on_change=lambda: save_config(config)).bind_value(config, "room_id").style("width: 150px"):
+        with ui.input(label="房间号", on_change=lambda v: save_config({"room_id": v.value})).bind_value(config, "room_id").style("width: 150px"):
             ui.tooltip('需连接的房间号')
 
         # with ui.row():
@@ -494,10 +475,10 @@ def index():
         #         ui.tooltip("送什么礼物可以点歌")
 
         with ui.row():
-            with ui.number("勋章等级", on_change=lambda: save_config(config), min=0, value=0.0).bind_value(config, "medal_level").style("width: 150px"):
+            with ui.number("勋章等级", on_change=lambda v: save_config({"medal_level": v.value}), min=0, value=0.0).bind_value(config, "medal_level").style("width: 150px"):
                 ui.tooltip("粉丝勋章超过多少级可以点歌，0=无限制")
 
-            with ui.number("SC价格", on_change=lambda: save_config(config), min=0, value=0.0).bind_value(config, "sc_level").style("width: 150px"):
+            with ui.number("SC价格", on_change=lambda v : save_config({"sc_level": v.value}), min=0, value=0.0).bind_value(config, "sc_level").style("width: 150px"):
                 ui.tooltip("SC金额超过多少可以点歌（元），0=无限制")
 
         # 连接至直播间
