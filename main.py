@@ -19,7 +19,7 @@ from nicegui import ui
 from blivedm import blivedm
 from itertools import islice
 
-version = "1.2.0"
+version = "1.3.0"
 
 logger = log.logger
 logger.debug("version: {}", version)
@@ -42,8 +42,29 @@ example_config = {
     "stop_status": False,
     "guard_status": False,
     "song_font_size": "text-5xl",
+    "marquee_status": False,
+    "marquee_time": 20,
+    "marquee_count": 4,
+    "song_title": "当前点歌",
+    "stop_msg": "当前不允许点歌",
     "cwd": ""
 }
+
+example_font_size_list = [
+    "text-xs",
+    "text-sm",
+    "text-base",
+    "text-lg",
+    "text-xl",
+    "text-2xl",
+    "text-3xl",
+    "text-4xl",
+    "text-5xl",
+    "text-6xl",
+    "text-7xl",
+    "text-8xl",
+    "text-9xl",
+]
 
 if not os.path.exists("data"):
     os.makedirs("data")
@@ -53,6 +74,10 @@ if not os.path.exists("data"):
 if not os.path.exists("config.json"):
     with open("config.json", "w+", encoding="utf-8") as f:
         json.dump(example_config, f, indent=4, ensure_ascii=False)
+
+if not os.path.exists("data/font_size.json"):
+    with open("data/font_size.json", "w+", encoding="utf-8") as f:
+        json.dump(example_font_size_list, f, indent=4, ensure_ascii=False)
 
 if not os.path.exists("data/play_list.json"):
     with open("data/play_list.json", "w+", encoding="utf-8") as f:
@@ -217,14 +242,48 @@ def create_show_card():
         config = json.load(f)
 
     if config.get("stop_status", False):
-        ui.label("当前不允许点歌").classes(f"{config.get("song_font_size", "text-5xl")} font-bold text-red-600")
+        ui.label(config.get("stop_msg", "当前不允许点歌")).classes(f"{config.get("song_font_size", "text-5xl")} font-bold text-red-600")
     else:
-        ui.label(f"当前点歌").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+        ui.label(config.get("song_title", "当前点歌")).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
 
     ui.html("<br/><br/>", sanitize=False)
 
-    for i in play_list:
-        ui.label(i).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+    # 垂直滚动样式
+    vertical_style = f'''
+    @keyframes scroll-up {{
+        0% {{ transform: translateY(0); }}
+        100% {{ transform: translateY(-50%); }}
+    }}
+
+    .marquee-container {{
+        height: 400px;
+        overflow: hidden;
+        position: relative;
+    }}
+
+    .marquee-content {{
+        animation: scroll-up {config.get("marquee_time", 20)}s linear infinite;
+    }}
+
+    .marquee-content:hover {{
+        animation-play-state: paused;
+    }}
+    '''
+
+    ui.add_head_html(f'<style>{vertical_style}</style>')
+
+    with ui.column().classes("marquee-container"):
+        with ui.column() as marquee_column:
+            if len(play_list) > config.get("marquee_count", 4) and config.get("marquee_status", False):
+                marquee_column.classes("marquee-content")
+
+                for i in play_list:
+                    ui.label(i).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+
+            # 复制一份实现无缝滚动
+            ui.html("<br/>", sanitize=False)
+            for i in play_list:
+                ui.label(i).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
 
 def refresh_show_card():
     try:
@@ -408,15 +467,32 @@ def index():
 
         play_list_dialog.open()
 
-    def black_list_dialog():
-        # 弹窗
+    def list_setting_dialog():
+        with open("config.json", "r", encoding="utf-8") as f:
+            config = json.load(f)
         with open("data/black_list.json", "r", encoding="utf-8") as f:
             black_list = json.load(f)
 
-        with ui.dialog() as black_list_dialog, ui.card(align_items="center"):
-            ui.textarea(label="黑名单（每行一个）", value="\n".join(black_list), on_change=lambda v: save_config(v.value.splitlines(), "data/black_list.json")).style("width: 400px")
+        with ui.dialog() as list_setting_dialog, ui.card(align_items="center"):
+            ui.textarea(label="黑名单关键词（每行一个）", value="\n".join(black_list), on_change=lambda v: save_config(v.value.splitlines(), "data/black_list.json")).style("width: 400px")
 
-        black_list_dialog.open()
+            ui.switch("滚动歌单", on_change=lambda v: save_config({"marquee_status": v.value})).bind_value(config, "marquee_status")
+
+            with ui.row():
+                with ui.number(label="滚动速度", value=config.get("marquee_time", 20), on_change=lambda v: save_config({"marquee_time": int(v.value)})).style("width: 150px"):
+                    ui.tooltip("滚动整个列表需要多少秒")
+
+                with ui.number(label="滚动阈值", value=config.get("marquee_count", 4), on_change=lambda v: save_config({"marquee_count": int(v.value)})).style("width: 150px"):
+                    ui.tooltip("当点歌数量超过该值时开始滚动")
+
+            with ui.row():
+                ui.input("歌单标题", value=config.get("song_title", "当前点歌"), on_change=lambda v: save_config({"song_title": v.value})).style("width: 150px")
+
+                ui.input("停止标题", value=config.get("stop_msg", "当前不允许点歌"), on_change=lambda v: save_config({"stop_msg": v.value})).style("width: 150px")
+
+            ui.button("保存并关闭", on_click=lambda: list_setting_dialog.close()).on_click(lambda: refresh_show_card())
+
+        list_setting_dialog.open()
 
     def check_auth(loginInfo):
         status = bili_auth.login(loginInfo[0])
@@ -516,7 +592,7 @@ def index():
         with ui.row():
             ui.button("登录账号", on_click=lambda: bili_login())
             ui.button("已点列表", on_click=lambda: play_list_dialog())
-            ui.button("黑名单", on_click=lambda: black_list_dialog())
+            ui.button("歌单设置", on_click=lambda: list_setting_dialog())
             ui.button("检查更新", on_click=lambda: check_update())
 
         # 开关组
@@ -545,23 +621,12 @@ def index():
             with ui.input(label="房间号", on_change=lambda v: save_config({"room_id": v.value})).bind_value(config, "room_id").style("width: 150px"):
                 ui.tooltip('需连接的房间号')
 
-            font_size_list = [
-                'text-xs',     # 0.75rem (12px)
-                'text-sm',     # 0.875rem (14px)
-                'text-base',   # 1rem (16px)
-                'text-lg',     # 1.125rem (18px)
-                'text-xl',     # 1.25rem (20px)
-                'text-2xl',    # 1.5rem (24px)
-                'text-3xl',    # 1.875rem (30px)
-                'text-4xl',    # 2.25rem (36px)
-                'text-5xl',    # 3rem (48px)
-                'text-6xl',    # 3.75rem (60px)
-                'text-7xl',    # 4.5rem (72px)
-                'text-8xl',    # 6rem (96px)
-                'text-9xl',    # 8rem (128px)
-                ]
+            with open("data/font_size.json", "r", encoding="utf-8") as f:
+                font_size_list = json.load(f)
 
-            song_font_size_select = ui.select(label="歌名字体", options=font_size_list, on_change=lambda v: save_config({"song_font_size": v.value})).on_value_change(lambda: refresh_show_card()).bind_value(config, "song_font_size").style("width: 150px")
+            song_font_size_select = ui.select(label="歌名字体", options=font_size_list, on_change=lambda v: save_config({"song_font_size": v.value})).style("width: 150px")
+            song_font_size_select.on_value_change(lambda: refresh_show_card())
+            song_font_size_select.bind_value(config, "song_font_size")
 
         # with ui.row():
         #     with ui.select(label="选择礼物", options=[], on_change=lambda: save_config(config), multiple=True).bind_value(config, "gift_list").style("width: 150px"):

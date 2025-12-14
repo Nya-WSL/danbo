@@ -187,3 +187,5 @@ data/play_list.json
 data/black_list.json
 *.zip
 bili_qrcode_*.png
+data/font_size.json
+*test*
