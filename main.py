@@ -19,7 +19,7 @@ from nicegui import ui
 from blivedm import blivedm
 from itertools import islice
 
-version = "1.3.1"
+version = "1.3.2"
 
 logger = log.logger
 logger.debug("version: {}", version)
@@ -453,6 +453,13 @@ def index():
             refresh_card()
             refresh_show_card()
 
+        def clear_list():
+            with open("data/play_list.json", "w+", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=4)
+
+            refresh_card()
+            refresh_show_card()
+
         def create_card():
             with open("data/play_list.json", "r", encoding="utf-8") as f:
                 play_list = json.load(f)
@@ -470,8 +477,9 @@ def index():
 
         # 弹窗
         with ui.dialog() as play_list_dialog, ui.card(align_items="center"):
-            with ui.card().classes("w-full") as play_list_card:
+            with ui.card().classes("min-w-60 min-h-60") as play_list_card:
                 create_card()
+            ui.button("清空", on_click=lambda: clear_list())
 
         play_list_dialog.open()
 
@@ -632,7 +640,7 @@ def index():
             with open("data/font_size.json", "r", encoding="utf-8") as f:
                 font_size_list = json.load(f)
 
-            song_font_size_select = ui.select(label="歌名字体", options=font_size_list, on_change=lambda v: save_config({"song_font_size": v.value})).style("width: 150px")
+            song_font_size_select = ui.select(label="歌单字体", options=font_size_list, on_change=lambda v: save_config({"song_font_size": v.value})).style("width: 150px")
             song_font_size_select.on_value_change(lambda: refresh_show_card())
             song_font_size_select.bind_value(config, "song_font_size")
 
@@ -670,7 +678,7 @@ def index():
         else:
             song_title_label = ui.label(config.get("song_title", "当前点歌")).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
 
-        with ui.card(align_items="center").classes("bg-transparent") as show_card:
+        with ui.card(align_items="center").classes("bg-transparent min-w-96") as show_card:
             create_show_card()
 
 
