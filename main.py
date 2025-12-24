@@ -19,7 +19,7 @@ from nicegui import ui
 from blivedm import blivedm
 from itertools import islice
 
-version = "1.3.0"
+version = "1.3.1"
 
 logger = log.logger
 logger.debug("version: {}", version)
@@ -241,13 +241,6 @@ def create_show_card():
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    if config.get("stop_status", False):
-        ui.label(config.get("stop_msg", "当前不允许点歌")).classes(f"{config.get("song_font_size", "text-5xl")} font-bold text-red-600")
-    else:
-        ui.label(config.get("song_title", "当前点歌")).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
-
-    ui.html("<br/><br/>", sanitize=False)
-
     # 垂直滚动样式
     vertical_style = f'''
     @keyframes scroll-up {{
@@ -277,13 +270,17 @@ def create_show_card():
             if len(play_list) > config.get("marquee_count", 4) and config.get("marquee_status", False):
                 marquee_column.classes("marquee-content")
 
+                num = 1
                 for i in play_list:
-                    ui.label(i).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+                    ui.label(f"{num}. {i}").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+                    num += 1
 
             # 复制一份实现无缝滚动
             ui.html("<br/>", sanitize=False)
+            num = 1
             for i in play_list:
-                ui.label(i).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+                ui.label(f"{num}. {i}").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+                num += 1
 
 def refresh_show_card():
     try:
@@ -294,6 +291,17 @@ def refresh_show_card():
 
     except NameError:
         logger.warning("show_card未创建，跳过刷新")
+
+def change_song_title(status: bool):
+    with open("config.json", "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    if not status:
+        song_title_label.set_text(config.get("song_title", "当前点歌"))
+        song_title_label.classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+    else:
+        song_title_label.set_text(config.get("stop_msg", "当前不允许点歌"))
+        song_title_label.classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
 
 def send_danmaku(msg: str):
     with open("config.json", "r", encoding="utf-8") as f:
@@ -610,7 +618,7 @@ def index():
             with ui.switch("舰长点歌", on_change=lambda v: save_config({"guard_status": v.value})).bind_value(config, "guard_status"):
                 ui.tooltip('启用后舰长点歌无视规则，黑名单和停止点歌除外')
 
-            with ui.switch("停止点歌", on_change=lambda v: save_config({"stop_status": v.value})).on_value_change(lambda: refresh_show_card()).bind_value(config, "stop_status"):
+            with ui.switch("停止点歌", on_change=lambda v: save_config({"stop_status": v.value})).on_value_change(lambda v: change_song_title(v.value)).bind_value(config, "stop_status"):
                 ui.tooltip('是否停用点歌，启用后将不会响应任何点歌请求')
 
             # with ui.switch("礼物点歌", on_change=lambda: save_config(config)).bind_value(config, "gift_status"):
@@ -651,10 +659,19 @@ def index():
 
 @ui.page("/show")
 def index():
-    global show_card
+    global show_card, song_title_label
 
-    with ui.card(align_items="center").classes("bg-transparent").style("box-shadow: None; left: 50%; transform: translate(-50%, 0%);") as show_card: # 居中、背景透明、取消卡片阴影、置顶居中
-        create_show_card()
+    with ui.card(align_items="center").classes("bg-transparent").style("box-shadow: None; left: 50%; transform: translate(-50%, 0%);"): # 居中、背景透明、取消卡片阴影、置顶居中
+        with open("config.json", "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        if config.get("stop_status", False):
+            song_title_label = ui.label(config.get("stop_msg", "当前不允许点歌")).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+        else:
+            song_title_label = ui.label(config.get("song_title", "当前点歌")).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+
+        with ui.card(align_items="center").classes("bg-transparent") as show_card:
+            create_show_card()
 
 
 try:
