@@ -9,17 +9,18 @@ import blivedm.blivedm.models.web as web_models
 
 import log
 import apis
+import styles
 import update as danbo_update
 import bili_auth_web as bili_auth
 
 from changelog import get_log
 
 from typing import *
-from nicegui import ui
+from nicegui import ui, app
 from blivedm import blivedm
 from itertools import islice
 
-version = "1.3.2"
+version = "1.5.0"
 
 logger = log.logger
 logger.debug("version: {}", version)
@@ -42,6 +43,8 @@ example_config = {
     "stop_status": False,
     "guard_status": False,
     "song_font_size": "text-5xl",
+    "user_font_size": "text-3xl",
+    "badge_font_size": "text-xl",
     "marquee_status": False,
     "marquee_time": 20,
     "marquee_count": 4,
@@ -112,6 +115,8 @@ host = config["host"]
 port = config["port"]
 
 b_connect_status = False
+
+app.add_static_files("/static", "static")
 
 async def start_handler():
     global sender, client
@@ -218,16 +223,13 @@ def check_rules(data, data_type: str, owner_uid: int = None) -> bool | str:
     except Exception as e:
         return f"规则错误：{e}"
 
-def request_song(song, artist, user):
+def request_song(song, user):
     with open("data/play_list.json", "r", encoding="utf-8") as f:
         play_list = json.load(f)
 
-    if artist != "":
-        if len(user) > 8:
-            user = user[:5] + "..."
-        play_list.append(f"{song} - {artist} - {user}")
-    else:
-        play_list.append(f"{song} - {user}")
+    if len(user) > 8:
+        user = user[:5] + "..."
+    play_list.append({"song": song, "user": user})
 
     with open("data/play_list.json", "w+", encoding="utf-8") as f:
         json.dump(play_list, f, ensure_ascii=False, indent=4)
@@ -272,14 +274,18 @@ def create_show_card():
 
                 num = 1
                 for i in play_list:
-                    ui.label(f"{num}. {i}").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+                    with ui.row(align_items="end"):
+                        ui.label(f"{num}. {i['song']}").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+                        ui.label(f"{i['user']}").classes(f"{config.get("user_font_size", "text-3xl")} font-bold")
                     num += 1
 
             # 复制一份实现无缝滚动
             ui.html("<br/>", sanitize=False)
             num = 1
             for i in play_list:
-                ui.label(f"{num}. {i}").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+                with ui.row(align_items="end"):
+                    ui.label(f"{num}. {i['song']}").classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
+                    ui.label(f"{i['user']}").classes(f"{config.get("user_font_size", "text-3xl")} font-bold")
                 num += 1
 
 def refresh_show_card():
@@ -291,6 +297,33 @@ def refresh_show_card():
 
     except NameError:
         logger.warning("show_card未创建，跳过刷新")
+
+def create_badge_row():
+    with open("config.json", "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    if config.get("danmu_status", False):
+        ui.badge("弹幕点歌", outline=True).classes("text-xl font-bold")
+    if config.get("guard_status", False):
+        ui.badge("舰长点歌", outline=True).classes("text-xl font-bold")
+    if config.get("sc_status", False):
+        ui.badge(f"SC ≥ {int(config.get('sc_level', 0))}￥", outline=True).classes("text-xl font-bold")
+    if config.get("medal_status", False):
+        ui.badge(f"粉丝勋章 ≥ {int(config.get('medal_level', 0))}级", outline=True).classes("text-xl font-bold")
+
+def refresh_badge_row():
+    try:
+        badge_row.clear()
+
+        with badge_row:
+            create_badge_row()
+
+    except NameError:
+        logger.warning("badge_row未创建，跳过刷新")
+
+def refresh_element():
+    refresh_show_card()
+    refresh_badge_row()
 
 def change_song_title(status: bool):
     with open("config.json", "r", encoding="utf-8") as f:
@@ -331,7 +364,7 @@ class BiliHandler(blivedm.BaseHandler):
         if split_msg[0] == "点歌":
             status = check_rules(message, "danmu", owner_uid)
             if status == True:
-                request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "", user)
+                request_song(" ".join(split_msg[1:]).strip(), user)
             elif status == False:
                 return
             else:
@@ -359,7 +392,7 @@ class BiliHandler(blivedm.BaseHandler):
         if split_msg[0] == "点歌":
             status = check_rules(message, "sc")
             if status == True:
-                request_song(split_msg[1], split_msg[2] if len(split_msg) > 2 else "", user)
+                request_song(" ".join(split_msg[1:]).strip(), user)
             elif status == False:
                 return
             else:
@@ -423,6 +456,7 @@ async def check_b_connect_status():
 @ui.page('/')
 def index():
     global b_connect_switch
+    styles.page_styles() # 加载自定义样式
     # 打开config.json文件，读取配置
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -466,7 +500,7 @@ def index():
 
             for i in play_list:
                 with ui.row().classes("w-full"):
-                    ui.label(i).on("click", lambda i = i: ui.clipboard.write(i.split(" - ")[0])).on("click", lambda: ui.notify("已复制至剪贴板", type="info"))
+                    ui.label(f'{i["song"]} - {i["user"]}').on("click", lambda i = i: ui.clipboard.write(i["song"])).on("click", lambda: ui.notify("已复制至剪贴板", type="info"))
                     ui.space()
                     ui.button("删除", on_click=lambda i = i: del_song(i))
 
@@ -613,17 +647,17 @@ def index():
 
         # 开关组
         with ui.row():
-            with ui.switch("粉丝勋章", on_change=lambda v: save_config({"medal_status": v.value})).bind_value(config, "medal_status"):
+            with ui.switch("粉丝勋章", on_change=lambda v: save_config({"medal_status": v.value})).bind_value(config, "medal_status").on_value_change(lambda: refresh_badge_row()):
                 ui.tooltip('是否启用粉丝勋章点歌')
 
-            with ui.switch("SC点歌", on_change=lambda v: save_config({"sc_status": v.value})).bind_value(config, "sc_status"):
+            with ui.switch("SC点歌", on_change=lambda v: save_config({"sc_status": v.value})).bind_value(config, "sc_status").on_value_change(lambda: refresh_badge_row()):
                 ui.tooltip('是否启用SC点歌')
 
-            with ui.switch("弹幕点歌", on_change=lambda v: save_config({"danmu_status": v.value})).bind_value(config, "danmu_status"):
+            with ui.switch("弹幕点歌", on_change=lambda v: save_config({"danmu_status": v.value})).bind_value(config, "danmu_status").on_value_change(lambda: refresh_badge_row()):
                 ui.tooltip('是否启用弹幕点歌')
 
         with ui.row():
-            with ui.switch("舰长点歌", on_change=lambda v: save_config({"guard_status": v.value})).bind_value(config, "guard_status"):
+            with ui.switch("舰长点歌", on_change=lambda v: save_config({"guard_status": v.value})).bind_value(config, "guard_status").on_value_change(lambda: refresh_badge_row()):
                 ui.tooltip('启用后舰长点歌无视规则，黑名单和停止点歌除外')
 
             with ui.switch("停止点歌", on_change=lambda v: save_config({"stop_status": v.value})).on_value_change(lambda v: change_song_title(v.value)).bind_value(config, "stop_status"):
@@ -640,20 +674,29 @@ def index():
             with open("data/font_size.json", "r", encoding="utf-8") as f:
                 font_size_list = json.load(f)
 
-            song_font_size_select = ui.select(label="歌单字体", options=font_size_list, on_change=lambda v: save_config({"song_font_size": v.value})).style("width: 150px")
+        with ui.row():
+            with ui.number("勋章等级", on_change=lambda v: save_config({"medal_level": v.value}), min=0, value=0.0).bind_value(config, "medal_level").style("width: 150px").on_value_change(lambda: refresh_badge_row()):
+                ui.tooltip("粉丝勋章超过多少级可以点歌，0=无限制")
+
+            with ui.number("SC价格", on_change=lambda v : save_config({"sc_level": v.value}), min=30, value=30).bind_value(config, "sc_level").style("width: 150px").on_value_change(lambda: refresh_badge_row()):
+                ui.tooltip("SC金额超过多少可以点歌（元），最低30")
+
+        with ui.row():
+            song_font_size_select = ui.select(label="歌名字体", options=font_size_list, on_change=lambda v: save_config({"song_font_size": v.value})).style("width: 150px")
             song_font_size_select.on_value_change(lambda: refresh_show_card())
             song_font_size_select.bind_value(config, "song_font_size")
+
+            user_font_size_select = ui.select(label="用户字体", options=font_size_list, on_change=lambda v: save_config({"user_font_size": v.value})).style("width: 150px")
+            user_font_size_select.on_value_change(lambda: refresh_show_card())
+            user_font_size_select.bind_value(config, "user_font_size")
+
+            badge_font_size_select = ui.select(label="规则字体", options=font_size_list, on_change=lambda v: save_config({"badge_font_size": v.value})).style("width: 150px")
+            badge_font_size_select.on_value_change(lambda: refresh_badge_row())
+            badge_font_size_select.bind_value(config, "badge_font_size")
 
         # with ui.row():
         #     with ui.select(label="选择礼物", options=[], on_change=lambda: save_config(config), multiple=True).bind_value(config, "gift_list").style("width: 150px"):
         #         ui.tooltip("送什么礼物可以点歌")
-
-        with ui.row():
-            with ui.number("勋章等级", on_change=lambda v: save_config({"medal_level": v.value}), min=0, value=0.0).bind_value(config, "medal_level").style("width: 150px"):
-                ui.tooltip("粉丝勋章超过多少级可以点歌，0=无限制")
-
-            with ui.number("SC价格", on_change=lambda v : save_config({"sc_level": v.value}), min=30, value=0.0).bind_value(config, "sc_level").style("width: 150px"):
-                ui.tooltip("SC金额超过多少可以点歌（元），最低30")
 
         # 连接至直播间
         with ui.row():
@@ -667,12 +710,13 @@ def index():
 
 @ui.page("/show")
 def index():
-    global show_card, song_title_label
+    global show_card, song_title_label, badge_row
+
+    styles.page_styles() # 加载自定义样式
+    with open("config.json", "r", encoding="utf-8") as f:
+        config = json.load(f)
 
     with ui.card(align_items="center").classes("bg-transparent").style("box-shadow: None; left: 50%; transform: translate(-50%, 0%);"): # 居中、背景透明、取消卡片阴影、置顶居中
-        with open("config.json", "r", encoding="utf-8") as f:
-            config = json.load(f)
-
         if config.get("stop_status", False):
             song_title_label = ui.label(config.get("stop_msg", "当前不允许点歌")).classes(f"{config.get("song_font_size", "text-5xl")} font-bold")
         else:
@@ -681,8 +725,13 @@ def index():
         with ui.card(align_items="center").classes("bg-transparent min-w-96") as show_card:
             create_show_card()
 
+        ui.badge("点歌指令：点歌 Tell Your World", outline=True).classes("text-xl font-bold")
+
+        with ui.row() as badge_row:
+            create_badge_row()
+
 
 try:
-    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret", window_size=[500, 520])
+    ui.run(host=host, port=port, title=f"danbo v{version}", reload=False, native=True, language="zh-CN", reconnect_timeout=30, storage_secret=f"danbo v{version} secret", window_size=[600, 600])
 except:
     logger.error(traceback.format_exc())
