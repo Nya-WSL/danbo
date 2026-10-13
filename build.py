@@ -1,9 +1,7 @@
-import os
-import time
-import shutil
+import subprocess
 
 def build():
-    os.system("poetry run python package.py --name danbo --windowed --icon static/logo.ico main.py")
+    subprocess.call(["uv", "run", "package.py", "--name", "danbo", "--windowed", "--icon", "static/logo.ico", "main.py"])
 
 if __name__ == "__main__":
     build()
